@@ -16,20 +16,28 @@
       ];
     in {
       lib = {
-        mkRustShell = { system, rustVersion ? "stable", extraPackages ? [ ] }:
+        mkRustShell = { system, channel ? "stable", version ? "latest"
+          , extraPackages ? [ ] }:
           let
             pkgs = import nixpkgs {
               inherit system;
               overlays = [ rust-overlay.overlays.default ];
             };
+
+            rustToolchain = if channel == "nightly" then
+              pkgs.rust-bin.nightly.${version}.default
+            else if channel == "beta" then
+              pkgs.rust-bin.beta.${version}.default
+            else
+              pkgs.rust-bin.stable.${version}.default;
+
           in pkgs.mkShell {
-            buildInputs = with pkgs;
-              [
-                (rust-bin.${rustVersion}.latest.default.override {
-                  extensions = [ "rust-src" "rust-analyzer" ];
-                })
-                pkg-config
-              ] ++ extraPackages;
+            buildInputs = [
+              (rustToolchain.override {
+                extensions = [ "rust-src" "rust-analyzer" ];
+              })
+              pkgs.pkg-config
+            ] ++ extraPackages;
 
             RUST_BACKTRACE = 1;
           };
