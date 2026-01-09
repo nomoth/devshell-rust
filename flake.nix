@@ -16,8 +16,17 @@
       ];
     in {
       lib = {
+        # Version simple: 95% des cas d'usage
         mkRustShell = { system, channel ? "stable", version ? "latest"
           , extraPackages ? [ ] }:
+          self.lib.mkRustShellAdvanced {
+            inherit system channel version extraPackages;
+          };
+
+        # Version avancée: tous les cas d'usage
+        mkRustShellAdvanced = { system, channel ? "stable", version ? "latest"
+          , extraPackages ? [ ], targets ? [ ], extensions ? [ "rust-src" "rust-analyzer" ]
+          , rustFlags ? null, envVars ? { } }:
           let
             pkgs = import nixpkgs {
               inherit system;
@@ -31,34 +40,51 @@
             else
               pkgs.rust-bin.stable.${version}.default;
 
-          in pkgs.mkShell {
+            # Variables d'environnement par défaut
+            defaultEnvVars = {
+              RUST_BACKTRACE = 1;
+            };
+
+            # Merge des variables d'environnement
+            allEnvVars = defaultEnvVars // envVars
+              // (if rustFlags != null then { RUSTFLAGS = rustFlags; } else { });
+
+          in pkgs.mkShell ({
             buildInputs = [
-              (rustToolchain.override {
-                extensions = [ "rust-src" "rust-analyzer" ];
-              })
+              (rustToolchain.override { inherit extensions targets; })
               pkgs.pkg-config
             ] ++ extraPackages;
-
-            RUST_BACKTRACE = 1;
-          };
+          } // allEnvVars);
       };
 
       checks = forAllSystems (system:
-        let shell = self.devShells.${system}.default;
+        let 
+          # Test de la version simple
+          shellSimple = self.devShells.${system}.default;
+          
+          # Test de la version avancée avec wasm
+          shellWasm = self.lib.mkRustShellAdvanced {
+            inherit system;
+            targets = [ "wasm32-unknown-unknown" ];
+          };
         in {
-          # Test simple : le devshell se build
-          devshell-builds = shell.overrideAttrs (old: {
+          devshell-simple-builds = shellSimple.overrideAttrs (old: {
             phases = [ "installPhase" ];
             installPhase = ''
-              # Vérifier que les outils essentiels existent
               command -v cargo >/dev/null || exit 1
               command -v rustc >/dev/null || exit 1
               command -v rust-analyzer >/dev/null || exit 1
-
-              # Vérifier les versions
               cargo --version
               rustc --version
-
+              touch $out
+            '';
+          });
+          
+          devshell-wasm-builds = shellWasm.overrideAttrs (old: {
+            phases = [ "installPhase" ];
+            installPhase = ''
+              # Vérifier que wasm32 est disponible
+              rustc --print target-list | grep wasm32-unknown-unknown || exit 1
               touch $out
             '';
           });
